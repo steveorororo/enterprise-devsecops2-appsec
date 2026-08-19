@@ -1,0 +1,42 @@
+# Curated check set. The built-in defaults include opinionated checks that are not security
+# controls, such as minimum replica counts, DNS configuration, node affinity, and owner
+# labels.
+checks:
+  doNotAutoAddDefaults: true
+  include:
+    # Container hardening. These enforce the securityContext baseline in deploy/base.
+    - privileged-container
+    - privilege-escalation-container
+    - run-as-non-root
+    - no-read-only-root-fs
+    - drop-net-raw-capability
+    - unsafe-sysctls
+    - privileged-ports
+
+    # Host isolation.
+    - host-network
+    - host-pid
+    - host-ipc
+    - docker-sock
+
+    # Secret hygiene.
+    - env-var-secret
+    - ssh-port
+
+    # Availability and correctness.
+    - unset-memory-requirements
+    - unset-cpu-requirements
+    - no-liveness-probe
+    - no-readiness-probe
+    - dangling-service
+    - mismatching-selector
+    - non-existent-service-account
+    - duplicate-env-var
+    - invalid-target-ports
+
+customChecks: []
+
+# unset-cpu-requirements fires on the deliberately absent CPU limit. The check covers both
+# requests and limits and cannot be narrowed to requests alone, so it is scoped out for the
+# application Deployment only, where the omission is intentional and documented in
+# deploy/base/deployment.yaml.

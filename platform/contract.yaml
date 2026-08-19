@@ -41,6 +41,32 @@ workflows:
     # removes branch protection for every consumer, so it is part of the contract.
     status_check: gate
 
+  - path: .github/workflows/manifest-security.yml
+    status: released
+    purpose: Kubernetes manifest security. Renders overlays, then lints the rendered output.
+    consumer_job_id: manifest-lint
+    inputs:
+      required:
+        - name: platform_ref
+          type: string
+          purpose: >-
+            Commit of this repository to load central configuration from. Must equal the
+            commit the caller pinned, so policy and implementation move together.
+      optional:
+        - name: overlays
+          type: string
+          purpose: Space separated overlay directories. Defaults to dev test prod.
+    secrets:
+      required: []
+      optional: []
+    permissions:
+      workflow: {}
+      job:
+        contents: read
+    outputs: []
+    invariants:
+      - render-error-propagation
+
 caller:
   # A caller must pin an immutable commit. Mutable references such as @main are rejected.
   reference: immutable_sha
