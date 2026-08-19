@@ -41,7 +41,7 @@ jobs:
           set -euo pipefail
           echo "caller repository: ${CALLER_REPO}"
           echo "caller ref:        ${CALLER_REF}"
-          echo "platform commit:   ${PLATFORM_SHA}"
+          echo "platform reference: ${PLATFORM_REF}"
           echo "application_path:  ${APPLICATION_PATH}"
           echo "platform_version:  ${PLATFORM_VERSION:-unset}"
 
@@ -50,17 +50,19 @@ jobs:
             exit 1
           fi
 
-          # A caller that pinned a mutable reference would not resolve to a commit here.
-          # Immutable consumption is the contract, so this is enforced rather than reported.
-          case "${PLATFORM_SHA}" in
-            [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]*) ;;
-            *)
-              echo "::error::platform commit did not resolve to an immutable reference." >&2
+          # job_workflow_ref carries the reference the caller actually pinned, in the form
+          # owner/repo/.github/workflows/file.yml@<ref>. Immutable consumption is the
+          # contract, so a caller on a branch or tag is rejected rather than reported.
+          pinned="${PLATFORM_REF##*@}"
+          echo "pinned reference:  ${pinned}"
+          case "${pinned}" in
+            refs/heads/*|refs/tags/*|main|master)
+              echo "::error::platform is consumed at mutable reference ${pinned}." >&2
               exit 1
               ;;
           esac
-          if [ "${#PLATFORM_SHA}" -ne 40 ]; then
-            echo "::error::platform commit ${PLATFORM_SHA} is not a full 40 character commit." >&2
+          if [ "${#pinned}" -ne 40 ] || [ -n "$(printf '%s' "${pinned}" | tr -d '0-9a-f')" ]; then
+            echo "::error::platform reference ${pinned} is not a full 40 character commit." >&2
             exit 1
           fi
 
@@ -69,6 +71,6 @@ jobs:
         env:
           CALLER_REPO: ${{ github.repository }}
           CALLER_REF: ${{ github.ref }}
-          PLATFORM_SHA: ${{ github.job_workflow_sha }}
+          PLATFORM_REF: ${{ github.job_workflow_ref }}
           APPLICATION_PATH: ${{ inputs.application_path }}
           PLATFORM_VERSION: ${{ inputs.platform_version }}
