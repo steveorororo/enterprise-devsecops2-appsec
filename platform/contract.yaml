@@ -1,31 +1,56 @@
 # Reusable workflow compatibility contract, treated as an enterprise API.
 #
 # Machine readable so a consumer fixture can be checked against it and drift is detected
-# before it reaches application repositories. docs/compatibility-contract.md states the
-# change rules; this file states the interface.
+# before it reaches application repositories. docs/compatibility-contract.md states the change
+# rules; this file states the interface.
 #
 # Removing or renaming an element, changing its meaning, increasing required privileges,
 # increasing secret exposure or changing gate semantics is a breaking change and requires
 # compatibility analysis and regression evidence. Additive optional inputs are compatible.
 #
-# The implementation of these workflows is not extracted yet. The contract is declared first
-# so extraction is measured against a stated interface rather than defining it after the fact.
+# consumer_job_id is part of the contract. Those ids are what a consuming repository's gate
+# configuration and branch protection evaluate, so a control whose id changes stops being
+# evaluated while everything still reports success.
+#
+# platform_ref appears on every workflow that reads central configuration. It must equal the
+# commit the caller pinned, which keeps implementation and policy on the same commit.
 
 workflows:
-  - path: .github/workflows/pr-security.yml
-    status: planned
-    purpose: Pull request security validation and the central security gate.
+  - path: .github/workflows/secret-scanning.yml
+    status: released
+    purpose: Committed credential detection across full history.
+    consumer_job_id: secrets-scan
     inputs:
       required:
-        - name: application_path
+        - name: platform_ref
           type: string
-          purpose: Application source directory within the calling repository.
+          purpose: Commit of this repository the caller pinned.
+      optional: []
+    secrets:
+      required: []
+      optional: []
+    permissions:
+      workflow: {}
+      job:
+        contents: read
+    outputs: []
+
+  - path: .github/workflows/dependency-security.yml
+    status: released
+    purpose: Dependency vulnerability scanning of the application source tree.
+    consumer_job_id: sca-trivy-fs
+    inputs:
+      required:
+        - name: platform_ref
+          type: string
+          purpose: Commit of this repository the caller pinned.
+        - name: scan_path
+          type: string
+          purpose: Application directory to scan.
       optional:
-        - name: platform_version
+        - name: trivyignore
           type: string
-          purpose: Human readable release identifier accompanying the pinned workflow SHA.
-    # Only secrets the workflow genuinely requires. secrets: inherit is not a supported
-    # calling convention, because it grants the callee every credential the caller holds.
+          purpose: Governed suppression file owned by the consuming repository.
     secrets:
       required: []
       optional: []
@@ -34,12 +59,55 @@ workflows:
       job:
         contents: read
         security-events: write
-    outputs:
-      - name: gate_result
-        purpose: Aggregate result of the mandatory controls.
-    # The status check name application repository rulesets require. Renaming it silently
-    # removes branch protection for every consumer, so it is part of the contract.
-    status_check: gate
+    outputs: []
+
+  - path: .github/workflows/dependency-review.yml
+    status: released
+    purpose: Reviews dependency changes introduced by a pull request.
+    consumer_job_id: dependency-review
+    inputs:
+      required:
+        - name: platform_ref
+          type: string
+          purpose: Commit of this repository the caller pinned.
+      optional:
+        - name: fail_on_severity
+          type: string
+          purpose: Lowest severity that fails the review.
+    secrets:
+      required: []
+      optional: []
+    permissions:
+      workflow: {}
+      job:
+        contents: read
+    outputs: []
+
+  - path: .github/workflows/iac-security.yml
+    status: released
+    purpose: Infrastructure as code scanning of rendered manifests and the container build.
+    consumer_job_id: iac-checkov
+    inputs:
+      required:
+        - name: platform_ref
+          type: string
+          purpose: Commit of this repository the caller pinned.
+      optional:
+        - name: overlays
+          type: string
+          purpose: Space separated overlay directories.
+        - name: dockerfile
+          type: string
+          purpose: Dockerfile path in the calling repository.
+    secrets:
+      required: []
+      optional: []
+    permissions:
+      workflow: {}
+      job:
+        contents: read
+        security-events: write
+    outputs: []
 
   - path: .github/workflows/manifest-security.yml
     status: released
@@ -49,13 +117,11 @@ workflows:
       required:
         - name: platform_ref
           type: string
-          purpose: >-
-            Commit of this repository to load central configuration from. Must equal the
-            commit the caller pinned, so policy and implementation move together.
+          purpose: Commit of this repository the caller pinned.
       optional:
         - name: overlays
           type: string
-          purpose: Space separated overlay directories. Defaults to dev test prod.
+          purpose: Space separated overlay directories.
     secrets:
       required: []
       optional: []
@@ -67,8 +133,86 @@ workflows:
     invariants:
       - render-error-propagation
 
+  - path: .github/workflows/code-scanning.yml
+    status: released
+    purpose: Static analysis of the languages a consuming repository declares.
+    consumer_job_id: codeql
+    inputs:
+      required:
+        - name: platform_ref
+          type: string
+          purpose: Commit of this repository the caller pinned.
+        - name: language_matrix
+          type: string
+          purpose: >-
+            Language matrix including whether matching source is present, produced by the
+            consuming repository from its own pipeline configuration.
+      optional: []
+    secrets:
+      required: []
+      optional: []
+    permissions:
+      workflow: {}
+      job:
+        contents: read
+        security-events: write
+    outputs: []
+    invariants:
+      - no-source-is-not-scanner-failure
+
+  - path: .github/workflows/security-gate.yml
+    status: released
+    purpose: >-
+      Aggregates the security job results into the single check branch protection requires,
+      and applies platform mandatory control policy over the consumer's configuration.
+    consumer_job_id: gate
+    inputs:
+      required:
+        - name: platform_ref
+          type: string
+          purpose: Commit of this repository the caller pinned.
+        - name: needs
+          type: string
+          purpose: JSON of the calling workflow's needs context.
+      optional:
+        - name: gate_config
+          type: string
+          purpose: Gate configuration path in the calling repository.
+    secrets:
+      required: []
+      optional: []
+    permissions:
+      workflow: {}
+      job:
+        contents: read
+    outputs: []
+    status_check: gate
+
+  - path: .github/workflows/contract-check.yml
+    status: released
+    purpose: Confirms a consuming repository is wired to this platform correctly.
+    consumer_job_id: null
+    inputs:
+      required:
+        - name: application_path
+          type: string
+          purpose: Application source directory in the calling repository.
+      optional:
+        - name: platform_version
+          type: string
+          purpose: Human readable release identifier accompanying the pinned commit.
+    secrets:
+      required: []
+      optional: []
+    permissions:
+      workflow: {}
+      job: {}
+    outputs:
+      - name: contract_result
+        purpose: Result of the consumption boundary checks.
+
 caller:
-  # A caller must pin an immutable commit. Mutable references such as @main are rejected.
+  # A caller must pin an immutable commit. Mutable references are rejected.
   reference: immutable_sha
   forbidden_references:
     - "@main"

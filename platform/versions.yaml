@@ -10,13 +10,19 @@
 #   released    consumable. workflow_sha must be a full 40 character commit that exists here.
 #   unreleased  in development. workflow_sha must be null. Not consumable.
 #
-# No platform version has been released. The reusable security workflows are not yet
-# implemented and no approved remote exists, so recording a SHA here would assert an approval
-# that has not happened.
+# A released entry records the commit consumers execute. Development continues on later
+# commits without affecting a consumer until it adopts a new release.
 
-current_released: null
+current_released: "1.0.0"
 
 versions:
+  - platform_version: "1.0.0"
+    status: released
+    workflow_sha: 351ea5b9ff24f51e4f9f51404447200007244df0
+    notes: >-
+      First consumable release. Secret detection, dependency scanning, dependency review,
+      infrastructure as code, manifest security, static analysis and the security gate.
+
   - platform_version: "0.1.0"
     status: unreleased
     workflow_sha: null

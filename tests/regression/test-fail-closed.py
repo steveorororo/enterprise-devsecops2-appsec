@@ -82,7 +82,8 @@ def version_cases(base: dict) -> list[tuple[str, object]]:
         ),
         (
             "current_released names an unreleased version",
-            mutate(lambda d: d.update(current_released=d["versions"][0]["platform_version"])),
+            mutate(lambda d: d.update(current_released=next(
+                e["platform_version"] for e in d["versions"] if e["status"] == "unreleased"))),
         ),
     ]
 
@@ -93,19 +94,36 @@ def consumer_cases(base: dict) -> list[tuple[str, object]]:
         fn(document)
         return document
 
-    def job(document: dict) -> dict:
-        return next(iter(document["jobs"].values()))
+    def job(document: dict, name: str = "manifest-lint") -> dict:
+        return document["jobs"][name]
+
+    def rename(document: dict, old: str, new_name: str) -> None:
+        document["jobs"][new_name] = document["jobs"].pop(old)
+
+    other = "0" * 40
 
     return [
         ("mutable main reference", mutate(lambda d: job(d).update(
-            uses="bcgov/enterprise-devsecops2-appsec/.github/workflows/pr-security.yml@main"))),
+            uses="steveorororo/enterprise-devsecops2-appsec/.github/workflows/"
+                 "manifest-security.yml@main"))),
         ("secrets inherit", mutate(lambda d: job(d).update(secrets="inherit"))),
         ("undeclared secret", mutate(lambda d: job(d).update(secrets={"REGISTRY_TOKEN": "x"}))),
-        ("required input removed", mutate(lambda d: job(d)["with"].pop("application_path"))),
+        ("required input removed", mutate(lambda d: job(d)["with"].pop("platform_ref"))),
         ("undeclared input", mutate(lambda d: job(d)["with"].update(sast=False))),
         ("privilege increase", mutate(lambda d: job(d)["permissions"].update(contents="write"))),
         ("undeclared permission", mutate(lambda d: job(d)["permissions"].update(actions="write"))),
-        ("workflow permissions widened", mutate(lambda d: d.update(permissions={"contents": "read"}))),
+        ("workflow permissions widened",
+         mutate(lambda d: d.update(permissions={"contents": "read"}))),
+        # The pinned commit and the platform_ref input must be the same release, or a
+        # repository executes one implementation while loading another's configuration.
+        ("pointer split across releases",
+         mutate(lambda d: job(d)["with"].update(platform_ref=other))),
+        ("platform_version not released",
+         mutate(lambda d: job(d)["with"].update(platform_version="9.9.9"))),
+        # Job ids are the security gate contract. A renamed control stops being evaluated.
+        ("gate job id renamed", mutate(lambda d: rename(d, "manifest-lint", "manifests"))),
+        ("gate job id renamed to a plausible alias",
+         mutate(lambda d: rename(d, "iac-checkov", "checkov"))),
     ]
 
 
