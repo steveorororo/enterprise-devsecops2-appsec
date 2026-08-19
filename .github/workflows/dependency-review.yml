@@ -1,0 +1,40 @@
+# Dependency change review for consuming repositories.
+#
+# Compares the dependency manifests either side of a pull request and fails on a newly
+# introduced vulnerable or disallowed dependency. Complements filesystem scanning: this sees
+# what the change adds, rather than the state of the tree afterwards.
+#
+# Requires Dependency graph on the consuming repository. The job fails rather than skips when
+# it is unavailable, because a silently absent check is worse than a loud one.
+name: Dependency Review
+
+on:
+  workflow_call:
+    inputs:
+      platform_ref:
+        description: >-
+          Commit of this repository the caller pinned. Recorded for traceability; this
+          workflow reads no central configuration.
+        required: true
+        type: string
+      fail_on_severity:
+        description: Lowest severity that fails the review.
+        required: false
+        default: high
+        type: string
+
+permissions: {}
+
+jobs:
+  dependency-review:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - uses: actions/dependency-review-action@3b139cfc5fae8b618d3eae3675e383bb1769c019 # v4.5.0
+        with:
+          fail-on-severity: ${{ inputs.fail_on_severity }}

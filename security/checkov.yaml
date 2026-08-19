@@ -1,0 +1,32 @@
+framework:
+  - kubernetes
+  - dockerfile
+
+# Kubernetes checks run against rendered Kustomize output. Namespace assignment and the
+# image reference are resolved by Kustomize, so the namespace and image checks can only
+# evaluate the rendered result.
+#
+# Checkov is the authoritative infrastructure-as-code scanner here. Trivy's misconfig
+# scanner covers similar ground and is deliberately not layered on the same paths: one
+# finding reported twice adds triage work without adding coverage.
+
+skip-check:
+  # CPU limits are deliberately unset so containers can burst into unallocated node
+  # capacity; a limit throttles aggressively under load. The CPU request still guarantees
+  # the scheduler's floor. See deploy/base/deployment.yaml.
+  - CKV_K8S_11
+
+  # OpenShift's restricted SCC assigns the UID and GID at admission time. A hardcoded
+  # runAsUser, or a manifest assertion about the UID range, is rejected by the admission
+  # controller, so these checks cannot be satisfied on this platform. runAsNonRoot is set
+  # instead, which the SCC does honour.
+  - CKV_K8S_23
+  - CKV_K8S_40
+
+  # Kubernetes runs the startup, readiness, and liveness probes defined in
+  # deploy/base/deployment.yaml; a Dockerfile HEALTHCHECK is ignored by the kubelet and the
+  # distroless runtime image has no shell to execute one.
+  - CKV_DOCKER_2
+
+soft-fail: false
+compact: true

@@ -1,0 +1,63 @@
+# Central security gate for consuming repositories.
+#
+# Turns the results of the individual security jobs into the single check branch protection
+# requires. Only success passes. A skipped job passes only where both the consuming
+# repository and platform policy allow it, and a job that is required but missing from the
+# results fails, so removing a job from a workflow breaks the build rather than quietly
+# removing a control.
+#
+# Platform policy is applied on top of the consumer's own configuration. A consumer may add
+# controls and may not remove the mandatory ones.
+name: Security Gate
+
+on:
+  workflow_call:
+    inputs:
+      platform_ref:
+        description: >-
+          Commit of this repository to load the gate implementation and policy from. Must
+          equal the commit the caller pinned in its uses reference.
+        required: true
+        type: string
+      needs:
+        description: JSON of the calling workflow's needs context.
+        required: true
+        type: string
+      gate_config:
+        description: Gate configuration path in the calling repository.
+        required: false
+        default: config/security-gate.yaml
+        type: string
+
+permissions: {}
+
+jobs:
+  security-gate:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the calling repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Check out platform gate implementation
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: steveorororo/enterprise-devsecops2-appsec
+          ref: ${{ inputs.platform_ref }}
+          path: .platform
+          persist-credentials: false
+
+      - name: Evaluate the gate
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet PyYAML
+          python3 .platform/scripts/evaluate-gate.py \
+            --needs "$NEEDS" \
+            --config "$GATE_CONFIG" \
+            --policy .platform/security/mandatory-jobs.yaml
+        env:
+          NEEDS: ${{ inputs.needs }}
+          GATE_CONFIG: ${{ inputs.gate_config }}

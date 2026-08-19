@@ -1,0 +1,55 @@
+# Dependency vulnerability scanning for consuming repositories.
+#
+# Suppressions remain with the consuming application, because an accepted vulnerability is a
+# decision about that application. The severity threshold and failure behaviour are central.
+name: Dependency Security
+
+on:
+  workflow_call:
+    inputs:
+      platform_ref:
+        description: >-
+          Commit of this repository to load central configuration from. Must equal the commit
+          the caller pinned in its uses reference.
+        required: true
+        type: string
+      scan_path:
+        description: Directory in the calling repository to scan.
+        required: true
+        type: string
+      trivyignore:
+        description: Governed suppression file in the calling repository.
+        required: false
+        default: security/sca/.trivyignore
+        type: string
+
+permissions: {}
+
+jobs:
+  dependency-security:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Check out the calling repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: ${{ inputs.scan_path }}
+          format: sarif
+          output: trivy-fs.sarif
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+          ignore-unfixed: true
+          trivyignores: ${{ inputs.trivyignore }}
+
+      - uses: github/codeql-action/upload-sarif@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
+        if: always()
+        with:
+          sarif_file: trivy-fs.sarif
+          category: trivy-fs

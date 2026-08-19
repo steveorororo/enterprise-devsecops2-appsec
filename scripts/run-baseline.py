@@ -56,6 +56,18 @@ class Tools:
         return run([self.python, "-m", "checkov.main", "--version"]).returncode == 0
 
 
+def policy_file(platform_relative, target, target_relative):
+    """Central policy where it exists, otherwise the target's own copy.
+
+    Configuration migrates to this repository as capabilities are centralized. The fallback
+    keeps the harness able to measure a pre-extraction reference implementation.
+    """
+    central = REPO_ROOT / platform_relative
+    if central.is_file():
+        return central
+    return target / target_relative
+
+
 def run(command, cwd=None):
     return subprocess.run(command, capture_output=True, text=True, cwd=cwd,
                           encoding="utf-8", errors="replace")
@@ -166,9 +178,10 @@ def codeql_analyze(case, target, tools):
     if not tools.codeql:
         return UNAVAILABLE, "codeql cli not provided"
 
-    config = target / "security" / "sast" / "codeql-config.yml"
+    config = policy_file("security/codeql-config.yml", target,
+                         "security/sast/codeql-config.yml")
     if not config.is_file():
-        return UNAVAILABLE, "target has no codeql configuration"
+        return UNAVAILABLE, "no codeql configuration available"
 
     fixture = REPO_ROOT / case["fixture"]
     language = case.get("language", "javascript-typescript")
@@ -250,7 +263,8 @@ def scan(case, target, tools):
         binary = tools.find("kube-linter")
         if not binary:
             return UNAVAILABLE, "kube-linter not installed"
-        config = target / "security" / "iac" / ".kube-linter.yaml"
+        config = policy_file("security/kube-linter.yaml", target,
+                             "security/iac/.kube-linter.yaml")
 
         # The template renders overlays and lints the result, so the render is part of the
         # control. Linting source files directly would skip it and would not measure the
@@ -271,7 +285,8 @@ def scan(case, target, tools):
     if tool == "checkov":
         if not tools.has_checkov():
             return UNAVAILABLE, "checkov not installed"
-        config = target / "security" / "iac" / ".checkov.yaml"
+        config = policy_file("security/checkov.yaml", target,
+                             "security/iac/.checkov.yaml")
         result = run([tools.python, "-m", "checkov.main", "-d", str(fixture),
                       "--config-file", str(config), "--quiet", "--compact", "-o", "json"])
         return classify_checkov(result), "exit %d" % result.returncode
@@ -286,13 +301,17 @@ def scan(case, target, tools):
 
 
 def evaluate_gate(case, target, python):
-    script = target / "scripts" / "security" / "evaluate-gate.py"
-    if not script.is_file():
-        return UNAVAILABLE, "target has no evaluate-gate.py"
+    """Evaluate with the platform gate implementation against the target's configuration."""
+    script = REPO_ROOT / "scripts" / "evaluate-gate.py"
+    config = target / "config" / "security-gate.yaml"
+    policy = REPO_ROOT / "security" / "mandatory-jobs.yaml"
+    if not config.is_file():
+        return UNAVAILABLE, "target has no gate configuration"
     needs = {}
     for name, result in (case.get("needs") or {}).items():
         needs[name] = {"result": result}
-    outcome = run([python, str(script), "--needs", json.dumps(needs)])
+    outcome = run([python, str(script), "--needs", json.dumps(needs),
+                   "--config", str(config), "--policy", str(policy)])
     return ("pass" if outcome.returncode == 0 else "fail"), "exit %d" % outcome.returncode
 
 
@@ -305,6 +324,9 @@ def main():
     parser.add_argument("--python", default=sys.executable)
     parser.add_argument("--codeql", default=None,
                         help="Path to the CodeQL CLI executable")
+    parser.add_argument("--expect-commit", default=None,
+                        help="Commit the target must be at. Use 'any' to measure a "
+                             "post-extraction implementation instead of the frozen baseline.")
     args = parser.parse_args()
 
     target = args.target.resolve()
@@ -319,9 +341,12 @@ def main():
     baseline = expectations.get("baseline") or {}
     head = run(["git", "-C", str(target), "rev-parse", "HEAD"]).stdout.strip()
     print("target      %s" % target)
-    print("expected    %s" % baseline.get("commit", "unset"))
+    expected = args.expect_commit or baseline.get("commit")
+    print("expected    %s" % (expected or "unset"))
     print("actual      %s" % (head or "unknown"))
-    if baseline.get("commit") and head and baseline["commit"] != head:
+    if expected == "any":
+        print("measuring the checked out implementation, not the frozen baseline")
+    elif expected and head and expected != head:
         print("\nbaseline commit mismatch. The frozen reference is not checked out.",
               file=sys.stderr)
         return 1

@@ -1,0 +1,82 @@
+# Infrastructure as code security for consuming repositories.
+#
+# Kubernetes checks run against rendered Kustomize output. Namespace assignment and the image
+# reference are resolved by Kustomize, so those checks cannot evaluate raw base and overlay
+# files. The Dockerfile is scanned alongside the rendered manifests.
+name: IaC Security
+
+on:
+  workflow_call:
+    inputs:
+      platform_ref:
+        description: >-
+          Commit of this repository to load central configuration from. Must equal the commit
+          the caller pinned in its uses reference.
+        required: true
+        type: string
+      overlays:
+        description: Space separated overlay directories under deploy/overlays.
+        required: false
+        default: dev test prod
+        type: string
+      dockerfile:
+        description: Dockerfile path in the calling repository.
+        required: false
+        default: build/Dockerfile
+        type: string
+
+permissions: {}
+
+jobs:
+  iac-security:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Check out the calling repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Check out platform configuration
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: steveorororo/enterprise-devsecops2-appsec
+          ref: ${{ inputs.platform_ref }}
+          path: .platform
+          persist-credentials: false
+
+      - name: Render manifests
+        env:
+          KUSTOMIZE_VERSION: 5.4.3
+          OVERLAYS: ${{ inputs.overlays }}
+          DOCKERFILE: ${{ inputs.dockerfile }}
+        run: |
+          set -euo pipefail
+          base="https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv${KUSTOMIZE_VERSION}"
+          archive="kustomize_v${KUSTOMIZE_VERSION}_linux_amd64.tar.gz"
+          curl -sSfL -o "${archive}" "${base}/${archive}"
+          curl -sSfL -o checksums.txt "${base}/checksums.txt"
+          grep " ${archive}\$" checksums.txt | sha256sum -c -
+          tar -xzf "${archive}" kustomize
+          sudo mv kustomize /usr/local/bin/
+          mkdir -p rendered
+          for overlay in ${OVERLAYS}; do
+            kustomize build "deploy/overlays/${overlay}" > "rendered/${overlay}.yaml"
+          done
+          cp "${DOCKERFILE}" rendered/Dockerfile
+
+      - uses: bridgecrewio/checkov-action@9b70310bcd306d11740313070b940167d6b23085 # v12.3115.0
+        with:
+          directory: rendered
+          config_file: .platform/security/checkov.yaml
+          output_format: sarif
+          output_file_path: checkov.sarif
+          soft_fail: false
+
+      - uses: github/codeql-action/upload-sarif@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
+        if: always()
+        with:
+          sarif_file: checkov.sarif
+          category: checkov

@@ -1,0 +1,16 @@
+name: codeql config
+
+# No paths are excluded by default. An unedited configuration scans everything, which is the
+# safe default: a scan that silently skips files is worse than one that reports findings in
+# code you did not expect to cover.
+#
+# Once your application is in place, exclude generated output, vendored dependencies, and
+# coverage reports so findings point at code the team owns. Uncomment and edit:
+#
+# paths-ignore:
+#   - "vendor/**"
+#   - "**/generated/**"
+#   - "coverage/**"
+
+queries:
+  - uses: security-extended

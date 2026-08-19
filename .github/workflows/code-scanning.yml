@@ -1,0 +1,67 @@
+# Static analysis for consuming repositories.
+#
+# A configured language is analysed once the calling repository contains source for it. The
+# caller supplies the language matrix, including whether matching source is present, so a
+# language declared before its source exists does not fail the build. Analysis becomes
+# mandatory again as soon as matching source appears.
+#
+# A language with no source and a scanner that failed are different outcomes. Only the first
+# skips analysis, and any failure once analysis runs fails the job.
+name: Code Scanning
+
+on:
+  workflow_call:
+    inputs:
+      platform_ref:
+        description: >-
+          Commit of this repository to load central configuration from. Must equal the commit
+          the caller pinned in its uses reference.
+        required: true
+        type: string
+      language_matrix:
+        description: >-
+          JSON matrix of language, build_mode, runner and source_present, produced by the
+          calling repository from its own pipeline configuration.
+        required: true
+        type: string
+
+permissions: {}
+
+jobs:
+  code-scanning:
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      # One language having nothing to report must not cancel the analysis of another.
+      fail-fast: false
+      matrix: ${{ fromJSON(inputs.language_matrix) }}
+    steps:
+      - name: Check out the calling repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Check out platform configuration
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: steveorororo/enterprise-devsecops2-appsec
+          ref: ${{ inputs.platform_ref }}
+          path: .platform
+          persist-credentials: false
+
+      - if: ${{ !matrix.source_present }}
+        run: echo "No ${{ matrix.language }} source in this repository yet. Analysis runs automatically once matching source is added."
+
+      - if: ${{ matrix.source_present }}
+        uses: github/codeql-action/init@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build_mode }}
+          config-file: .platform/security/codeql-config.yml
+
+      - if: ${{ matrix.source_present }}
+        uses: github/codeql-action/analyze@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
+        with:
+          category: codeql-${{ matrix.language }}

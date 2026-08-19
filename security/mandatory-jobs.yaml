@@ -1,0 +1,21 @@
+# Controls every consuming repository must run, regardless of its own gate configuration.
+#
+# A consumer declares its required jobs in config/security-gate.yaml. That file can add
+# controls but cannot remove these, and cannot mark them skippable. Without this, a caller
+# could delete an entry from its own configuration and the gate would stop evaluating a
+# mandatory control while continuing to report success.
+#
+# Entries are GitHub Actions job ids, because that is what the gate evaluates.
+
+mandatory_jobs:
+  - secrets-scan
+  - dependency-review
+  - iac-checkov
+  - manifest-lint
+  - codeql
+
+# Controls that may legitimately not run, because a repository can be configured without
+# them. Listed centrally so the exemption is a platform decision rather than a caller one.
+permitted_skippable:
+  - unit-tests
+  - sca-trivy-fs

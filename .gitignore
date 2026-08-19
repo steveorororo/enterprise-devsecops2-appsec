@@ -38,3 +38,7 @@ Thumbs.db
 *.tmp
 *.log
 .local/
+
+# JVM crash dumps from scanner runs
+hs_err_pid*.log
+replay_pid*.log
