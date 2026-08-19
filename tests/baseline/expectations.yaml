@@ -94,6 +94,11 @@ cases:
     control: scanner-failure-handling
     tool: kube-linter
     expect: tool_error
+    detail: >-
+      The render step carries this control. kube-linter reports "no valid objects found" and
+      exits zero on input it cannot parse, so linting files directly would pass unparseable
+      manifests. Rendering first fails closed. Any implementation of this control must keep
+      the render, and the harness renders before linting for that reason.
 
   - id: malformed-manifest-iac
     fixture: tests/fixtures/failure-modes/malformed-manifest

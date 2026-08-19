@@ -32,6 +32,7 @@ EXECUTABLES = {
     "gitleaks": "gitleaks",
     "trivy": "trivy",
     "kube-linter": "kube-linter",
+    "kustomize": "kustomize",
 }
 
 
@@ -55,7 +56,13 @@ class Tools:
 
 
 def run(command, cwd=None):
-    return subprocess.run(command, capture_output=True, text=True, cwd=cwd)
+    return subprocess.run(command, capture_output=True, text=True, cwd=cwd,
+                          encoding="utf-8", errors="replace")
+
+
+def run_with_input(command, stdin_text):
+    return subprocess.run(command, capture_output=True, text=True, input=stdin_text,
+                          encoding="utf-8", errors="replace")
 
 
 def classify_gitleaks(result):
@@ -76,12 +83,16 @@ def classify_trivy(result):
 
 def classify_kube_linter(result):
     combined = (result.stdout + result.stderr).lower()
+    if "no lint errors found" in combined:
+        return CLEAN
+    if "no valid objects found" in combined:
+        # The linter accepts input it could not parse and exits zero. Reported as a technical
+        # failure rather than a clean result.
+        return TOOL_ERROR
     if "lint error" in combined:
         return FINDING
     if result.returncode == 0:
         return CLEAN
-    # Anything else is a load or parse failure. An input the linter could not read is not an
-    # input without findings.
     return TOOL_ERROR
 
 
@@ -170,7 +181,21 @@ def scan(case, target, tools):
         if not binary:
             return UNAVAILABLE, "kube-linter not installed"
         config = target / "security" / "iac" / ".kube-linter.yaml"
-        result = run([binary, "lint", "--config", str(config), str(fixture)])
+
+        # The template renders overlays and lints the result, so the render is part of the
+        # control. Linting source files directly would skip it and would not measure the
+        # control as it is actually wired.
+        if (fixture / "kustomization.yaml").is_file():
+            kustomize = tools.find("kustomize")
+            if not kustomize:
+                return UNAVAILABLE, "kustomize not installed"
+            rendered = run([kustomize, "build", str(fixture)])
+            if rendered.returncode != 0:
+                return TOOL_ERROR, "render failed"
+            result = run_with_input([binary, "lint", "--config", str(config), "-"],
+                                    rendered.stdout)
+        else:
+            result = run([binary, "lint", "--config", str(config), str(fixture)])
         return classify_kube_linter(result), "exit %d" % result.returncode
 
     if tool == "checkov":
