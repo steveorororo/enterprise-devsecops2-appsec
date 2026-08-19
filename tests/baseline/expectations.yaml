@@ -1,0 +1,102 @@
+# Expected behaviour of the developer template's security controls, stated before the
+# controls are run. Each case names the fixture, the control, the tool that enforces it and
+# the result the control must produce.
+#
+# result values:
+#   clean       tool ran and reported nothing that blocks
+#   finding     tool ran and reported a blocking result
+#   tool_error  tool could not complete. Never equivalent to clean.
+#
+# A vulnerable fixture that returns clean is a detection gap and stops centralization of the
+# affected control. A fixture that returns tool_error where a finding was expected is a
+# technical failure and is reported separately, because a scanner that did not run is not
+# evidence that an application is secure.
+
+baseline:
+  repository: enterprise-devsecops2-devteam
+  commit: f77eaccbbebc9e503bda934c1d6ef758a46ab06c
+  note: >-
+    Frozen reference implementation. Controls are exercised with this commit's scanner
+    configuration and pinned tool versions.
+
+cases:
+  - id: clean-secrets
+    fixture: tests/fixtures/clean
+    control: secret-protection
+    tool: gitleaks
+    expect: clean
+
+  - id: clean-dependencies
+    fixture: tests/fixtures/clean
+    control: dependency-scanning
+    tool: trivy-fs
+    expect: clean
+
+  - id: clean-manifest-lint
+    fixture: tests/fixtures/clean/deploy
+    control: kubernetes-manifest-security
+    tool: kube-linter
+    expect: clean
+
+  - id: clean-iac
+    fixture: tests/fixtures/clean
+    control: infrastructure-as-code
+    tool: checkov
+    expect: clean
+
+  - id: committed-secret
+    fixture: tests/fixtures/hardcoded-secret
+    control: secret-protection
+    tool: gitleaks
+    expect: finding
+
+  - id: vulnerable-dependency
+    fixture: tests/fixtures/vulnerable-dependency
+    control: dependency-scanning
+    tool: trivy-fs
+    expect: finding
+
+  - id: insecure-manifest-lint
+    fixture: tests/fixtures/insecure-manifest
+    control: kubernetes-manifest-security
+    tool: kube-linter
+    expect: finding
+
+  - id: insecure-manifest-iac
+    fixture: tests/fixtures/insecure-manifest
+    control: infrastructure-as-code
+    tool: checkov
+    expect: finding
+
+  - id: insecure-dockerfile
+    fixture: tests/fixtures/insecure-dockerfile
+    control: container-build-configuration
+    tool: checkov
+    expect: finding
+
+  - id: codeql-injection
+    fixture: tests/fixtures/codeql-injection
+    control: static-analysis
+    tool: codeql
+    expect: finding
+
+  - id: no-source-language
+    fixture: tests/fixtures/no-source
+    control: static-analysis-source-detection
+    tool: codeql-matrix
+    expect: clean
+    detail: >-
+      The declared application language reports no source, the workflow language reports
+      source present, and neither outcome fails the job.
+
+  - id: malformed-manifest-lint
+    fixture: tests/fixtures/failure-modes/malformed-manifest
+    control: scanner-failure-handling
+    tool: kube-linter
+    expect: tool_error
+
+  - id: malformed-manifest-iac
+    fixture: tests/fixtures/failure-modes/malformed-manifest
+    control: scanner-failure-handling
+    tool: checkov
+    expect: tool_error

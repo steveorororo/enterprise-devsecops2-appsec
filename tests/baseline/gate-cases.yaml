@@ -1,0 +1,65 @@
+# Security gate semantics, evaluated with the template's own gate implementation.
+#
+# The gate is the single required status check, so its behaviour is a control in its own
+# right. A skipped mandatory job must not pass, and a job that disappears from the workflow
+# must not pass either.
+
+cases:
+  - id: gate-clean-run
+    expect: pass
+    needs:
+      config: success
+      unit-tests: skipped
+      secrets-scan: success
+      sca-trivy-fs: skipped
+      dependency-review: success
+      iac-checkov: success
+      manifest-lint: success
+      codeql: success
+
+  - id: gate-scanner-finding
+    expect: fail
+    needs:
+      config: success
+      unit-tests: skipped
+      secrets-scan: failure
+      sca-trivy-fs: skipped
+      dependency-review: success
+      iac-checkov: success
+      manifest-lint: success
+      codeql: success
+
+  - id: gate-mandatory-job-skipped
+    expect: fail
+    needs:
+      config: success
+      unit-tests: skipped
+      secrets-scan: success
+      sca-trivy-fs: skipped
+      dependency-review: success
+      iac-checkov: success
+      manifest-lint: success
+      codeql: skipped
+
+  - id: gate-mandatory-job-removed
+    expect: fail
+    needs:
+      config: success
+      unit-tests: skipped
+      secrets-scan: success
+      sca-trivy-fs: skipped
+      dependency-review: success
+      iac-checkov: success
+      manifest-lint: success
+
+  - id: gate-scanner-cancelled
+    expect: fail
+    needs:
+      config: success
+      unit-tests: skipped
+      secrets-scan: success
+      sca-trivy-fs: skipped
+      dependency-review: success
+      iac-checkov: cancelled
+      manifest-lint: success
+      codeql: success

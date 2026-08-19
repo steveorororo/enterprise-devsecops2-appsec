@@ -51,6 +51,7 @@ exists is the foundation the extraction will be measured against:
 python3 scripts/validate-platform-versions.py
 python3 scripts/validate-consumer-contract.py
 python3 tests/regression/test-fail-closed.py
+python3 scripts/run-baseline.py --target <path to the developer template>
 ```
 
 Requires PyYAML. Scanner binaries are fetched at run time and are not committed.

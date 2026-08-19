@@ -1,0 +1,8 @@
+# Starter state: an application language is declared before the source exists. The
+# application language must report no analysis while the workflow language still analyses.
+application:
+  path: "<your-app-directory>"
+languages:
+  codeql:
+    - actions
+    - javascript-typescript
