@@ -13,9 +13,16 @@
 # A released entry records the commit consumers execute. Development continues on later
 # commits without affecting a consumer until it adopts a new release.
 
-current_released: "1.0.0"
+current_released: "1.0.1"
 
 versions:
+  - platform_version: "1.0.1"
+    status: released
+    workflow_sha: 1eafb6dcfcc0010711f0fe5ebb8f4ecffc89eeb6
+    notes: >-
+      Adds the release update contract and the job id and pointer checks in the consumer
+      contract gate. No change to scanner behaviour.
+
   - platform_version: "1.0.0"
     status: released
     workflow_sha: 351ea5b9ff24f51e4f9f51404447200007244df0
