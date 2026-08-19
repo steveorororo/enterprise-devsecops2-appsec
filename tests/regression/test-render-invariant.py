@@ -66,9 +66,12 @@ def main():
         return 2
 
     harness = load_harness()
-    config = args.target.resolve() / "security" / "iac" / ".kube-linter.yaml"
+    # The check policy is centrally owned. The target fallback keeps this able to measure a
+    # consumer that has not adopted the centralized control yet.
+    config = harness.policy_file("security/kube-linter.yaml", args.target.resolve(),
+                                 "security/iac/.kube-linter.yaml")
     if not config.is_file():
-        print("render invariant NOT EXECUTED: target linter configuration missing",
+        print("render invariant NOT EXECUTED: no linter configuration available",
               file=sys.stderr)
         return 2
 

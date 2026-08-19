@@ -83,9 +83,10 @@ def main():
             continue
         # Both the reference the workflow executes and the input that loads central
         # configuration move together. Updating one without the other is the split this
-        # tool exists to prevent.
-        updated = text.replace("%s@%s" % (repository, old_sha), "%s@%s" % (repository, new_sha))
-        updated = updated.replace("platform_ref: %s" % old_sha, "platform_ref: %s" % new_sha)
+        # tool exists to prevent, so every occurrence of the pinned commit moves at once.
+        # The commit is a full 40 character hash and identifies this platform release only,
+        # so it cannot collide with a pinned third-party action.
+        updated = text.replace(old_sha, new_sha)
         if updated != text:
             changed.append(path.relative_to(target).as_posix())
             if not args.dry_run:
