@@ -1,0 +1,114 @@
+# Centrally owned third-party CI and security dependencies.
+#
+# Recorded here so version, verification mechanism and trust anchor are reviewed in one place
+# rather than rediscovered in each workflow. Inventory taken from the frozen Repository 1
+# baseline; see tests/baseline/expectations.yaml for that commit.
+#
+# verification values:
+#   release_checksums   signed or published checksum file, entry matched then sha256sum -c
+#   cosign_key          cosign verify-blob against a project key whose digest is pinned
+#   action_sha          GitHub Action pinned to a full 40 character commit
+#   pypi_hashes         pip --require-hashes against published sdist and wheel digests
+#
+# GitHub Actions consumed in production remain pinned to full commit SHAs. Mutable references
+# are not acceptable for production consumption.
+
+actions:
+  - name: actions/checkout
+    ref: 11bd71901bbe5b1630ceea73d27597364c9af683
+    version: v4.2.2
+    verification: action_sha
+  - name: actions/upload-artifact
+    ref: 6f51ac03b9356f520e9adb1b1b7802705f340c2b
+    version: v4.5.0
+    verification: action_sha
+  - name: actions/download-artifact
+    ref: 634f93cb2916e3fdff6788551b99b062d0335ce0
+    version: v5.0.0
+    verification: action_sha
+  - name: actions/dependency-review-action
+    ref: 3b139cfc5fae8b618d3eae3675e383bb1769c019
+    version: v4.5.0
+    verification: action_sha
+  - name: github/codeql-action
+    ref: e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81
+    version: v4.37.3
+    verification: action_sha
+    used_as: [init, analyze, upload-sarif]
+  - name: aquasecurity/trivy-action
+    ref: ed142fd0673e97e23eac54620cfb913e5ce36c25
+    version: v0.36.0
+    verification: action_sha
+  - name: bridgecrewio/checkov-action
+    ref: 9b70310bcd306d11740313070b940167d6b23085
+    version: v12.3115.0
+    verification: action_sha
+  - name: anchore/sbom-action
+    ref: df80a981bc6edbc4e220a492d3cbe9f5547a6e75
+    version: v0.17.9
+    verification: action_sha
+  - name: sigstore/cosign-installer
+    ref: 6f9f17788090df1f26f669e9d70d6ae9567deba6
+    version: v4.1.2
+    verification: action_sha
+  - name: SonarSource/sonarqube-scan-action
+    ref: 22918119ff8e1ca75a623e15c8296b6ea4fbe28f
+    version: v8.2.1
+    verification: action_sha
+    optional: true
+  - name: peter-evans/create-pull-request
+    ref: 271a8d0340265f705b14b6d32b9829c1cb33d45e
+    version: v7.0.8
+    verification: action_sha
+  - name: zaproxy/action-baseline
+    ref: 7c4deb10e6261301961c86d65d54a516394f9aed
+    version: v0.14.0
+    verification: action_sha
+    optional: true
+  - name: zaproxy/action-full-scan
+    ref: 75ee1686750ab1511a73b26b77a2aedd295053ed
+    version: v0.12.0
+    verification: action_sha
+    optional: true
+
+cli_tools:
+  - name: kustomize
+    version: 5.4.3
+    source: kubernetes-sigs/kustomize releases
+    verification: release_checksums
+    trust_material: checksums.txt published with the release
+    rollback: 5.4.2
+  - name: gitleaks
+    version: 8.30.1
+    source: gitleaks/gitleaks releases
+    verification: release_checksums
+    trust_material: checksums file published with the release
+    rollback: 8.28.0
+  - name: kube-linter
+    version: 0.8.3
+    source: stackrox/kube-linter releases
+    verification: cosign_key
+    # Upstream disables checksum publication and signs binaries with a project key rather
+    # than a Fulcio identity, so the bundle carries a public key and no certificate chain.
+    # The key itself is pinned by digest, because a verification system is only as strong as
+    # its trust anchor.
+    trust_material:
+      file: kubelinter-cosign.pub
+      fetched_from_tag: true
+      sha256: db5fb95bf3e1d432a3e9153abcc75ca4985aad1e44f414b8ebc624a2fac97ba0
+    rollback: 0.7.2
+    maintenance_note: >-
+      A version bump requires re-pinning the key digest for the new tag. The digest and the
+      version are a pair and must change together.
+
+python:
+  - name: PyYAML
+    version: 6.0.3
+    verification: pypi_hashes
+    source: scripts/requirements-ci.txt in the consuming repository
+
+review:
+  cadence: >-
+    Reviewed on scanner or action release, on advisory notification, and whenever a
+    regression run reports a verification change. Ownership sits with the AppSec platform
+    maintainers of this repository.

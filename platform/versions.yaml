@@ -1,0 +1,25 @@
+# Mapping from platform_version to the approved immutable commit of the reusable security
+# workflows in this repository. Consuming repositories pin a workflow SHA; this file is the
+# record of which SHA each released platform version corresponds to.
+#
+# This mapping is a release gate, not metadata. scripts/validate-platform-versions.py fails
+# closed on a missing, unknown, malformed, mismatched or unresolvable entry, and a released
+# entry whose SHA does not exist in this repository is a failure rather than a warning.
+#
+# status values:
+#   released    consumable. workflow_sha must be a full 40 character commit that exists here.
+#   unreleased  in development. workflow_sha must be null. Not consumable.
+#
+# No platform version has been released. The reusable security workflows are not yet
+# implemented and no approved remote exists, so recording a SHA here would assert an approval
+# that has not happened.
+
+current_released: null
+
+versions:
+  - platform_version: "0.1.0"
+    status: unreleased
+    workflow_sha: null
+    notes: >-
+      Foundation, validation harness and current-state baseline. No reusable security
+      workflow is published at this version.

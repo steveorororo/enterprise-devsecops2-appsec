@@ -1,0 +1,40 @@
+# Credentials and key material
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+kubeconfig
+.kube/
+
+# Scanner and harness output. Baseline results are reported, not committed.
+*.sarif
+results/
+rendered/
+coverage/
+
+# Downloaded scanner binaries and release material. The toolchain inventory records
+# versions and verification; the artifacts themselves are fetched at run time.
+tools/
+*.tar.gz
+*.zip
+*.exe
+
+# Language and tool caches
+__pycache__/
+*.pyc
+.pytest_cache/
+node_modules/
+
+# Editor and operating system
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Scratch
+*.bak
+*.tmp
+*.log
+.local/

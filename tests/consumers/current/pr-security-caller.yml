@@ -1,0 +1,27 @@
+# Representative application repository caller. Belongs at .github/workflows/pr-security.yml
+# in a consuming repository. Held here so a change to the reusable workflow interface fails
+# in this repository rather than in the application repositories that depend on it.
+#
+# Not executed by this repository. scripts/validate-consumer-contract.py checks it against
+# platform/contract.yaml.
+#
+# The workflow reference carries the PLATFORM_WORKFLOW_SHA placeholder because no platform
+# version is released. On release the placeholder becomes the approved immutable commit, and
+# the validator then requires a full 40 character SHA.
+name: PR Security
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+
+permissions: {}
+
+jobs:
+  security:
+    uses: bcgov/enterprise-devsecops2-appsec/.github/workflows/pr-security.yml@PLATFORM_WORKFLOW_SHA
+    permissions:
+      contents: read
+      security-events: write
+    with:
+      application_path: app
+      platform_version: "0.1.0"
