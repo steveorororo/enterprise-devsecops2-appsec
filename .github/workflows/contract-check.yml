@@ -1,0 +1,56 @@
+# Contract validation for consuming repositories. Callable, and deliberately not a security
+# capability: it validates that a caller is wired to this platform correctly and that the
+# platform's own release and contract gates hold. Security controls are not executed here.
+#
+# Consumers call this at an immutable commit. Mutable references are not supported.
+name: Contract Check
+
+on:
+  workflow_call:
+    inputs:
+      application_path:
+        description: Application source directory in the calling repository.
+        required: true
+        type: string
+      platform_version:
+        description: Human readable release identifier accompanying the pinned commit.
+        required: false
+        type: string
+    outputs:
+      contract_result:
+        description: Result of the contract and release gates.
+        value: ${{ jobs.contract.outputs.result }}
+
+# No secrets are declared or accepted. A caller cannot pass credentials to this workflow,
+# and this workflow cannot reach any credential the caller holds.
+permissions: {}
+
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      result: ${{ steps.gates.outputs.result }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Report caller inputs
+        run: |
+          echo "application_path: ${APPLICATION_PATH}"
+          echo "platform_version: ${PLATFORM_VERSION:-unset}"
+        env:
+          APPLICATION_PATH: ${{ inputs.application_path }}
+          PLATFORM_VERSION: ${{ inputs.platform_version }}
+
+      - name: Run release and contract gates
+        id: gates
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet PyYAML
+          python3 scripts/validate-platform-versions.py
+          python3 scripts/validate-consumer-contract.py
+          python3 tests/regression/test-fail-closed.py
+          echo "result=passed" >> "$GITHUB_OUTPUT"
