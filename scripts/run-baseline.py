@@ -39,9 +39,10 @@ EXECUTABLES = {
 class Tools:
     """Resolves scanner executables from an explicit directory or from PATH."""
 
-    def __init__(self, directory, python):
+    def __init__(self, directory, python, codeql=None):
         self.directory = directory
         self.python = python
+        self.codeql = codeql
 
     def find(self, tool):
         name = EXECUTABLES[tool]
@@ -156,6 +157,75 @@ def codeql_matrix(case, target):
         return CLEAN, "actions present, javascript-typescript absent"
 
 
+def codeql_analyze(case, target, tools):
+    """Build a database from the fixture and analyse it with the target's own configuration.
+
+    Language and build mode come from the target's language table rather than being restated
+    here, so the analysis matches what the target would run.
+    """
+    if not tools.codeql:
+        return UNAVAILABLE, "codeql cli not provided"
+
+    config = target / "security" / "sast" / "codeql-config.yml"
+    if not config.is_file():
+        return UNAVAILABLE, "target has no codeql configuration"
+
+    fixture = REPO_ROOT / case["fixture"]
+    language = case.get("language", "javascript-typescript")
+    build_mode = case.get("build_mode", "none")
+
+    with tempfile.TemporaryDirectory() as raw:
+        database = Path(raw) / "db"
+        sarif = Path(raw) / "results.sarif"
+
+        created = run([tools.codeql, "database", "create", str(database),
+                       "--language=" + language,
+                       "--build-mode=" + build_mode,
+                       "--source-root=" + str(fixture),
+                       "--codescanning-config=" + str(config)])
+        if created.returncode != 0:
+            return TOOL_ERROR, "database create failed"
+
+        analysed = run([tools.codeql, "database", "analyze", str(database),
+                        "--format=sarif-latest", "--output=" + str(sarif),
+                        "--threads=4"])
+        if analysed.returncode != 0:
+            return TOOL_ERROR, "analysis failed"
+
+        try:
+            report = json.loads(sarif.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return TOOL_ERROR, "unreadable sarif"
+
+        runs = report.get("runs") or []
+        results = runs[0].get("results") if runs else []
+        if not results:
+            return CLEAN, "no alerts"
+
+        # The branch ruleset blocks on high or higher, so only alerts at that level are
+        # treated as blocking here.
+        severities = {}
+        for run_entry in runs:
+            tool_block = run_entry.get("tool") or {}
+            rule_sets = [(tool_block.get("driver") or {}).get("rules") or []]
+            for extension in tool_block.get("extensions") or []:
+                rule_sets.append(extension.get("rules") or [])
+            for rules in rule_sets:
+                for rule in rules:
+                    value = (rule.get("properties") or {}).get("security-severity")
+                    if value is not None:
+                        severities[rule.get("id")] = float(value)
+
+        blocking = []
+        for result in results:
+            if severities.get(result.get("ruleId"), 0.0) >= 7.0:
+                blocking.append(result.get("ruleId"))
+
+        if not blocking:
+            return CLEAN, "alerts below the blocking threshold"
+        return FINDING, ", ".join(sorted(set(blocking)))
+
+
 def scan(case, target, tools):
     tool = case["tool"]
     fixture = REPO_ROOT / case["fixture"]
@@ -210,7 +280,7 @@ def scan(case, target, tools):
         return codeql_matrix(case, target)
 
     if tool == "codeql":
-        return UNAVAILABLE, "codeql cli not installed"
+        return codeql_analyze(case, target, tools)
 
     return UNAVAILABLE, "unknown tool " + tool
 
@@ -233,6 +303,8 @@ def main():
     parser.add_argument("--tools", type=Path, default=None,
                         help="Directory holding scanner executables")
     parser.add_argument("--python", default=sys.executable)
+    parser.add_argument("--codeql", default=None,
+                        help="Path to the CodeQL CLI executable")
     args = parser.parse_args()
 
     target = args.target.resolve()
@@ -240,7 +312,7 @@ def main():
         print("target %s does not look like the developer template" % target, file=sys.stderr)
         return 1
 
-    tools = Tools(args.tools.resolve() if args.tools else None, args.python)
+    tools = Tools(args.tools.resolve() if args.tools else None, args.python, args.codeql)
     expectations = yaml.safe_load(EXPECTATIONS.read_text())
     gate = yaml.safe_load(GATE_CASES.read_text())
 
