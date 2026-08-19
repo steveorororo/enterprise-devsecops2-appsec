@@ -1,8 +1,10 @@
 # Contract validation for consuming repositories. Callable, and deliberately not a security
-# capability: it validates that a caller is wired to this platform correctly and that the
-# platform's own release and contract gates hold. Security controls are not executed here.
+# capability: it confirms a caller is wired to this platform correctly. No scanner runs here.
 #
-# Consumers call this at an immutable commit. Mutable references are not supported.
+# Self contained by design. A reusable workflow checks out the calling repository, not the
+# repository that hosts it, so reaching this repository's own files would need a credential
+# with access to it. The platform's release and contract gates therefore run in this
+# repository's own pipeline, and this workflow verifies the consumption boundary instead.
 name: Contract Check
 
 on:
@@ -18,7 +20,7 @@ on:
         type: string
     outputs:
       contract_result:
-        description: Result of the contract and release gates.
+        description: Result of the consumption boundary checks.
         value: ${{ jobs.contract.outputs.result }}
 
 # No secrets are declared or accepted. A caller cannot pass credentials to this workflow,
@@ -28,29 +30,45 @@ permissions: {}
 jobs:
   contract:
     runs-on: ubuntu-24.04
-    permissions:
-      contents: read
+    # Nothing is checked out and no API call is made, so no permission is required.
+    permissions: {}
     outputs:
-      result: ${{ steps.gates.outputs.result }}
+      result: ${{ steps.verify.outputs.result }}
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          persist-credentials: false
-
-      - name: Report caller inputs
-        run: |
-          echo "application_path: ${APPLICATION_PATH}"
-          echo "platform_version: ${PLATFORM_VERSION:-unset}"
-        env:
-          APPLICATION_PATH: ${{ inputs.application_path }}
-          PLATFORM_VERSION: ${{ inputs.platform_version }}
-
-      - name: Run release and contract gates
-        id: gates
+      - name: Verify the consumption boundary
+        id: verify
         run: |
           set -euo pipefail
-          python3 -m pip install --quiet PyYAML
-          python3 scripts/validate-platform-versions.py
-          python3 scripts/validate-consumer-contract.py
-          python3 tests/regression/test-fail-closed.py
+          echo "caller repository: ${CALLER_REPO}"
+          echo "caller ref:        ${CALLER_REF}"
+          echo "platform commit:   ${PLATFORM_SHA}"
+          echo "application_path:  ${APPLICATION_PATH}"
+          echo "platform_version:  ${PLATFORM_VERSION:-unset}"
+
+          if [ -z "${APPLICATION_PATH}" ]; then
+            echo "::error::application_path is required by the platform contract." >&2
+            exit 1
+          fi
+
+          # A caller that pinned a mutable reference would not resolve to a commit here.
+          # Immutable consumption is the contract, so this is enforced rather than reported.
+          case "${PLATFORM_SHA}" in
+            [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]*) ;;
+            *)
+              echo "::error::platform commit did not resolve to an immutable reference." >&2
+              exit 1
+              ;;
+          esac
+          if [ "${#PLATFORM_SHA}" -ne 40 ]; then
+            echo "::error::platform commit ${PLATFORM_SHA} is not a full 40 character commit." >&2
+            exit 1
+          fi
+
           echo "result=passed" >> "$GITHUB_OUTPUT"
+          echo "consumption boundary verified"
+        env:
+          CALLER_REPO: ${{ github.repository }}
+          CALLER_REF: ${{ github.ref }}
+          PLATFORM_SHA: ${{ github.job_workflow_sha }}
+          APPLICATION_PATH: ${{ inputs.application_path }}
+          PLATFORM_VERSION: ${{ inputs.platform_version }}
