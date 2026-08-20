@@ -288,7 +288,7 @@ jobs:
             --certificate-identity-regexp "${IDENTITY}" \
             --output json \
             "${IMAGE_REF}@${DIGEST}" > verified.json
-          python3 -c "import json; e=json.load(open('verified.json'))[0]['optional']; print('SIGNER_SUBJECT=' + str(e.get('Subject'))); print('SIGNER_ISSUER=' + str(e.get('Issuer')))"
+          python3 -c "import json; e=json.load(open('verified.json'))[0].get('optional',{}); [print('CERT %s = %s' % (k, v)) for k, v in sorted(e.items()) if 'sha' not in str(k).lower()]"
           cosign verify-attestation \
             --type spdxjson \
             --certificate-oidc-issuer "${ISSUER}" \
