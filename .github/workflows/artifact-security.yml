@@ -281,10 +281,14 @@ jobs:
           set -euo pipefail
           echo "expected issuer:   ${ISSUER}"
           echo "expected identity: ${IDENTITY}"
+          # The identity recorded in the certificate is printed so the enforced trust
+          # relationship is auditable from the run rather than inferred from policy.
           cosign verify \
             --certificate-oidc-issuer "${ISSUER}" \
             --certificate-identity-regexp "${IDENTITY}" \
-            "${IMAGE_REF}@${DIGEST}" > /dev/null
+            --output json \
+            "${IMAGE_REF}@${DIGEST}" > verified.json
+          python3 -c "import json; e=json.load(open('verified.json'))[0]['optional']; print('SIGNER_SUBJECT=' + str(e.get('Subject'))); print('SIGNER_ISSUER=' + str(e.get('Issuer')))"
           cosign verify-attestation \
             --type spdxjson \
             --certificate-oidc-issuer "${ISSUER}" \
