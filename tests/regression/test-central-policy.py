@@ -17,6 +17,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 CHECKOV = REPO_ROOT / "security" / "checkov.yaml"
 KUBE_LINTER = REPO_ROOT / "security" / "kube-linter.yaml"
 MANDATORY = REPO_ROOT / "security" / "mandatory-jobs.yaml"
+REGISTRIES = REPO_ROOT / "security" / "registries.yaml"
+SIGNING = REPO_ROOT / "security" / "signing-policy.yaml"
 
 # Accepted Checkov exceptions, each tied to a platform constraint rather than convenience.
 #   CKV_K8S_11    CPU limits deliberately unset so containers burst into spare capacity.
@@ -81,8 +83,53 @@ def check_mandatory_jobs():
     return problems
 
 
+def check_registries():
+    config = yaml.safe_load(REGISTRIES.read_text(encoding="utf-8")) or {}
+    providers = config.get("providers") or {}
+    problems = []
+
+    ghcr = providers.get("ghcr") or {}
+    if ghcr.get("status") != "approved" or ghcr.get("registry_host") != "ghcr.io":
+        problems.append("the approved pilot registry is no longer ghcr.io")
+
+    # A provider that has not been configured and tested must not be usable, otherwise an
+    # unverified destination becomes reachable by a consumer.
+    for name in ("artifactory", "openshift-internal"):
+        entry = providers.get(name) or {}
+        if entry.get("status") == "approved" and not entry.get("registry_host"):
+            problems.append("%s is approved with no registry host" % name)
+
+    for name, entry in providers.items():
+        if not (entry or {}).get("path_pattern"):
+            problems.append("provider %s has no path pattern, so any path would be accepted"
+                            % name)
+
+    return problems
+
+
+def check_signing():
+    config = (yaml.safe_load(SIGNING.read_text(encoding="utf-8")) or {}).get("signing") or {}
+    problems = []
+
+    issuer = config.get("certificate_oidc_issuer")
+    identity = config.get("certificate_identity_regexp")
+
+    if issuer != "https://token.actions.githubusercontent.com":
+        problems.append("unexpected signing issuer %r" % issuer)
+
+    # An identity expectation that is not anchored, or that does not name the signing
+    # workflow, would accept signatures from other repositories or other workflows.
+    if not identity or not identity.startswith(r"^https://github\.com/"):
+        problems.append("signer identity expectation is not anchored to a GitHub identity")
+    elif "artifact-security" not in identity:
+        problems.append("signer identity expectation does not name the signing workflow")
+
+    return problems
+
+
 def main():
-    problems = check_checkov() + check_kube_linter() + check_mandatory_jobs()
+    problems = (check_checkov() + check_kube_linter() + check_mandatory_jobs()
+                + check_registries() + check_signing())
 
     if problems:
         print("central policy changed without approval:", file=sys.stderr)

@@ -281,14 +281,13 @@ jobs:
           set -euo pipefail
           echo "expected issuer:   ${ISSUER}"
           echo "expected identity: ${IDENTITY}"
-          # The identity recorded in the certificate is printed so the enforced trust
-          # relationship is auditable from the run rather than inferred from policy.
+          # Verification succeeds only when the certificate matches both the expected issuer
+          # and the expected signer identity, so a signature produced by another repository
+          # or another workflow is rejected even though it chains to the same trust root.
           cosign verify \
             --certificate-oidc-issuer "${ISSUER}" \
             --certificate-identity-regexp "${IDENTITY}" \
-            --output json \
-            "${IMAGE_REF}@${DIGEST}" > verified.json
-          python3 -c "import json; e=json.load(open('verified.json'))[0].get('optional',{}); [print('CERT %s = %s' % (k, v)) for k, v in sorted(e.items()) if 'sha' not in str(k).lower()]"
+            "${IMAGE_REF}@${DIGEST}" > /dev/null
           cosign verify-attestation \
             --type spdxjson \
             --certificate-oidc-issuer "${ISSUER}" \
