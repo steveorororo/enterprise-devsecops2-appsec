@@ -31,16 +31,44 @@ starter template instead.
 | `manifest-security.yml` | `manifest-lint` | Kubernetes manifest security |
 | `code-scanning.yml` | `codeql` | Static analysis |
 | `security-gate.yml` | `gate` | Aggregate required check |
+| `artifact-security.yml` | not gated | Build, publish, scan, SBOM, sign, verify |
 | `contract-check.yml` | not gated | Consumer wiring check |
 
 Consumer job ids are part of the contract. They are what a consuming repository's gate
 configuration and branch protection evaluate, so a control whose id changes stops being
 evaluated while still reporting success.
 
-Image build, SBOM, signing and GitOps promotion remain in the consuming repository. Moving
-them requires a registry and credentials to demonstrate equivalence, which the current
-validation environment does not provide, and an unproven extraction is not worth the blast
-radius of centralizing it.
+## Artifact security
+
+The artifact chain builds once and binds every later stage to the digest the registry
+returned, so the artifact that was examined is the artifact that gets promoted.
+
+```text
+build -> publish -> registry digest -> scan -> SBOM -> sign and attest -> verify -> promote
+```
+
+Registry destinations are governed by `security/registries.yaml`. A consumer chooses a
+provider and a path; it does not choose whether a destination is allowed. Authorization runs
+in a job with no registry permission, so an unapproved destination is refused before any job
+holding a credential starts. GHCR is the approved provider today. Artifactory and the
+OpenShift integrated registry are named as candidates and are rejected at run time until an
+endpoint, path convention and credential exist for them.
+
+Verification constrains both the signature and the signer. `security/signing-policy.yaml`
+fixes the expected issuer and an identity expectation anchored to this repository and the
+signing workflow, so a signature from another repository is rejected even though it chains to
+the same public trust root.
+
+Scanning, SBOM generation and signing are not caller inputs. A consumer selects where to
+publish and what to build, not whether the artifact is checked.
+
+`.github/workflows/artifact-round-trip.yml` exercises the whole chain against the real
+registry using the fixtures in `tests/fixtures/`.
+
+The legacy artifact implementation in the consuming repository has not been removed. Running
+it for a like for like comparison needs a long lived registry credential that the pilot does
+not use, so its behaviour is documented rather than executed, and the old implementation
+stays until that comparison can be made.
 
 ## Layout
 

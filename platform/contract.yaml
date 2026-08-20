@@ -211,6 +211,59 @@ workflows:
       - name: contract_result
         purpose: Result of the consumption boundary checks.
 
+  - path: .github/workflows/artifact-security.yml
+    status: released
+    purpose: >-
+      Builds once, publishes to an approved registry, then scans, generates an SBOM, signs
+      and verifies the digest the registry returned.
+    consumer_job_id: null
+    inputs:
+      required:
+        - name: platform_ref
+          type: string
+          purpose: Commit of this repository the caller pinned.
+        - name: registry_provider
+          type: string
+          purpose: Provider key, resolved against the approved provider list.
+        - name: registry_path
+          type: string
+          purpose: Repository path within the registry.
+        - name: image_name
+          type: string
+          purpose: Image name to publish.
+      optional:
+        - name: build_context
+          type: string
+          purpose: Build context directory in the calling repository.
+        - name: dockerfile
+          type: string
+          purpose: Dockerfile path in the calling repository.
+        - name: requested_host
+          type: string
+          purpose: >-
+            Host the caller believes it publishes to. Compared against policy, and a
+            mismatch is refused rather than corrected.
+    secrets:
+      required: []
+      optional: []
+    permissions:
+      workflow: {}
+      job:
+        contents: read
+        packages: write
+        security-events: write
+        id-token: write
+    outputs:
+      - name: image_ref
+        purpose: Approved image reference.
+      - name: digest
+        purpose: Digest the registry returned.
+    invariants:
+      - approved-registry-only
+      - digest-continuity
+      - signer-identity-and-issuer-constrained
+      - scan-and-sbom-precede-signing
+
 caller:
   # A caller must pin an immutable commit. Mutable references are rejected.
   reference: immutable_sha
