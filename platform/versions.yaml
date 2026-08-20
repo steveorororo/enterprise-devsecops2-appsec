@@ -13,9 +13,16 @@
 # A released entry records the commit consumers execute. Development continues on later
 # commits without affecting a consumer until it adopts a new release.
 
-current_released: "1.0.1"
+current_released: "1.1.0"
 
 versions:
+  - platform_version: "1.1.0"
+    status: released
+    workflow_sha: e1d7ee3190beb208d36c5cb7bc5a3747c33f0cd2
+    notes: >-
+      Adds the artifact security chain: approved registry authorization, build once, digest
+      capture, image scanning, SBOM, signing and identity constrained verification.
+
   - platform_version: "1.0.1"
     status: released
     workflow_sha: 1eafb6dcfcc0010711f0fe5ebb8f4ecffc89eeb6
