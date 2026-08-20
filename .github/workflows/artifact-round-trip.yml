@@ -7,6 +7,10 @@
 name: Artifact Round Trip
 
 on:
+  # Runs on the validation branch so the chain can be exercised before the implementation is
+  # released. Dispatch is available once this reaches the default branch.
+  push:
+    branches: [feat/centralize-artifact-security]
   workflow_dispatch:
     inputs:
       fixture:
@@ -32,9 +36,9 @@ jobs:
       platform_ref: ${{ github.sha }}
       registry_provider: ghcr
       registry_path: steveorororo/enterprise-devsecops2-appsec
-      image_name: ${{ inputs.fixture }}
-      build_context: tests/fixtures/${{ inputs.fixture }}
-      dockerfile: tests/fixtures/${{ inputs.fixture }}/Dockerfile
+      image_name: ${{ inputs.fixture || 'artifact-clean' }}
+      build_context: tests/fixtures/${{ inputs.fixture || 'artifact-clean' }}
+      dockerfile: tests/fixtures/${{ inputs.fixture || 'artifact-clean' }}/Dockerfile
       requested_host: ghcr.io
 
   report:
