@@ -1,0 +1,325 @@
+# Artifact security for consuming repositories.
+#
+# Builds once, publishes to an approved registry, and binds every later stage to the digest
+# the registry returned. Scanning, SBOM generation, signing and verification all address that
+# exact digest, so the artifact that was examined is the artifact that gets promoted.
+#
+# Scanning, SBOM and signing are not optional inputs. A caller selects where to publish and
+# what to build, not whether the artifact is checked.
+#
+# Registry authorization runs in its own job with no registry access. An unapproved
+# destination is refused before any job that holds a publishing credential starts, so
+# credentials are never offered to a host the platform has not approved.
+name: Artifact Security
+
+on:
+  workflow_call:
+    inputs:
+      platform_ref:
+        description: >-
+          Commit of this repository to load central policy from. Must equal the commit the
+          caller pinned in its uses reference.
+        required: true
+        type: string
+      registry_provider:
+        description: Registry provider key, resolved against the approved provider list.
+        required: true
+        type: string
+      registry_path:
+        description: Repository path within the registry, such as owner/name.
+        required: true
+        type: string
+      image_name:
+        description: Image name to publish.
+        required: true
+        type: string
+      build_context:
+        description: Build context directory in the calling repository.
+        required: false
+        default: .
+        type: string
+      dockerfile:
+        description: Dockerfile path in the calling repository.
+        required: false
+        default: build/Dockerfile
+        type: string
+      requested_host:
+        description: >-
+          Host the caller believes it publishes to. Compared against policy. A mismatch is
+          refused rather than corrected.
+        required: false
+        default: ""
+        type: string
+    outputs:
+      image_ref:
+        description: Approved image reference without a tag or digest.
+        value: ${{ jobs.authorize.outputs.image_ref }}
+      digest:
+        description: Digest the registry returned for the published artifact.
+        value: ${{ jobs.publish.outputs.digest }}
+
+permissions: {}
+
+jobs:
+  # Holds no registry permission. A rejected destination therefore cannot reach a job that
+  # could authenticate to it.
+  authorize:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      registry_host: ${{ steps.resolve.outputs.registry_host }}
+      image_ref: ${{ steps.resolve.outputs.image_ref }}
+      authentication_mode: ${{ steps.resolve.outputs.authentication_mode }}
+    steps:
+      - name: Check out platform policy
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: steveorororo/enterprise-devsecops2-appsec
+          ref: ${{ inputs.platform_ref }}
+          path: .platform
+          persist-credentials: false
+
+      - name: Authorize registry destination
+        id: resolve
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet PyYAML
+          python3 .platform/scripts/resolve-registry.py \
+            --provider "$PROVIDER" \
+            --path "$REGISTRY_PATH" \
+            --image-name "$IMAGE_NAME" \
+            ${REQUESTED_HOST:+--requested-host "$REQUESTED_HOST"} \
+            --policy .platform/security/registries.yaml
+        env:
+          PROVIDER: ${{ inputs.registry_provider }}
+          REGISTRY_PATH: ${{ inputs.registry_path }}
+          IMAGE_NAME: ${{ inputs.image_name }}
+          REQUESTED_HOST: ${{ inputs.requested_host }}
+
+  publish:
+    needs: authorize
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Build image
+        run: |
+          set -euo pipefail
+          buildah bud --file "${DOCKERFILE}" --tag "${IMAGE_REF}:${GITHUB_SHA}" "${BUILD_CONTEXT}"
+        env:
+          IMAGE_REF: ${{ needs.authorize.outputs.image_ref }}
+          DOCKERFILE: ${{ inputs.dockerfile }}
+          BUILD_CONTEXT: ${{ inputs.build_context }}
+
+      - name: Publish image
+        id: push
+        run: |
+          set -euo pipefail
+          buildah login --username "$REGISTRY_USER" --password-stdin "$REGISTRY_HOST" <<< "$REGISTRY_TOKEN"
+          # --digestfile records what the registry returned. A locally computed manifest
+          # digest is not guaranteed to match it, and everything downstream must address the
+          # artifact the registry actually stored.
+          buildah push --digestfile /tmp/image.digest \
+            "${IMAGE_REF}:${GITHUB_SHA}" \
+            "docker://${IMAGE_REF}:${GITHUB_SHA}"
+          digest="$(cat /tmp/image.digest)"
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+          echo "published ${IMAGE_REF}@${digest}"
+        env:
+          IMAGE_REF: ${{ needs.authorize.outputs.image_ref }}
+          REGISTRY_HOST: ${{ needs.authorize.outputs.registry_host }}
+          REGISTRY_USER: ${{ github.actor }}
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  scan:
+    needs: [authorize, publish]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: read
+      security-events: write
+    steps:
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: ${{ needs.authorize.outputs.image_ref }}@${{ needs.publish.outputs.digest }}
+          format: sarif
+          output: trivy-image.sarif
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+          ignore-unfixed: true
+        env:
+          TRIVY_USERNAME: ${{ github.actor }}
+          TRIVY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: github/codeql-action/upload-sarif@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
+        if: always()
+        with:
+          sarif_file: trivy-image.sarif
+          category: trivy-image
+
+  sbom:
+    needs: [authorize, publish]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Generate SBOM for the published digest
+        uses: anchore/sbom-action@df80a981bc6edbc4e220a492d3cbe9f5547a6e75 # v0.17.9
+        with:
+          image: ${{ needs.authorize.outputs.image_ref }}@${{ needs.publish.outputs.digest }}
+          format: spdx-json
+          output-file: sbom.spdx.json
+          registry-username: ${{ github.actor }}
+          registry-password: ${{ secrets.GITHUB_TOKEN }}
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Confirm the SBOM describes the published artifact
+        run: |
+          set -euo pipefail
+          python3 - "$DIGEST" <<'PY'
+          import json, sys
+          digest = sys.argv[1]
+          with open("sbom.spdx.json", encoding="utf-8") as handle:
+              document = json.load(handle)
+          blob = json.dumps(document)
+          if digest not in blob:
+              # An SBOM that does not name the published digest describes some other
+              # artifact, which would let an unexamined image be promoted.
+              print("::error::SBOM does not reference %s" % digest)
+              raise SystemExit(1)
+          print("SBOM subject includes %s" % digest)
+          PY
+        env:
+          DIGEST: ${{ needs.publish.outputs.digest }}
+
+      - uses: actions/upload-artifact@6f51ac03b9356f520e9adb1b1b7802705f340c2b # v4.5.0
+        with:
+          # Digests contain a colon, which is not valid in an artifact name.
+          name: sbom-${{ github.sha }}
+          path: sbom.spdx.json
+          retention-days: 90
+          if-no-files-found: error
+
+  # Signing happens only after the artifact has passed scanning and has an SBOM, so a
+  # signature is never produced for an artifact that failed its checks.
+  sign:
+    needs: [authorize, publish, scan, sbom]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          name: sbom-${{ github.sha }}
+
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Authenticate to the registry
+        run: |
+          set -euo pipefail
+          cosign login --username "$REGISTRY_USER" --password-stdin "$REGISTRY_HOST" <<< "$REGISTRY_TOKEN"
+        env:
+          REGISTRY_HOST: ${{ needs.authorize.outputs.registry_host }}
+          REGISTRY_USER: ${{ github.actor }}
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Sign and attest the published digest
+        run: |
+          set -euo pipefail
+          cosign sign --yes "${IMAGE_REF}@${DIGEST}"
+          cosign attest --yes --type spdxjson --predicate sbom.spdx.json "${IMAGE_REF}@${DIGEST}"
+        env:
+          IMAGE_REF: ${{ needs.authorize.outputs.image_ref }}
+          DIGEST: ${{ needs.publish.outputs.digest }}
+
+  # A signature alone proves only that something signed the artifact. Verification also
+  # constrains who, using the identity and issuer fixed in central policy.
+  verify:
+    needs: [authorize, publish, sign]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Check out platform policy
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: steveorororo/enterprise-devsecops2-appsec
+          ref: ${{ inputs.platform_ref }}
+          path: .platform
+          persist-credentials: false
+
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Load trust policy
+        id: policy
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet PyYAML
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import yaml
+          policy = yaml.safe_load(open(".platform/security/signing-policy.yaml", encoding="utf-8"))["signing"]
+          print("issuer=%s" % policy["certificate_oidc_issuer"])
+          print("identity=%s" % policy["certificate_identity_regexp"])
+          PY
+
+      - name: Verify signature and signer identity
+        run: |
+          set -euo pipefail
+          echo "expected issuer:   ${ISSUER}"
+          echo "expected identity: ${IDENTITY}"
+          cosign verify \
+            --certificate-oidc-issuer "${ISSUER}" \
+            --certificate-identity-regexp "${IDENTITY}" \
+            "${IMAGE_REF}@${DIGEST}" > /dev/null
+          cosign verify-attestation \
+            --type spdxjson \
+            --certificate-oidc-issuer "${ISSUER}" \
+            --certificate-identity-regexp "${IDENTITY}" \
+            "${IMAGE_REF}@${DIGEST}" > /dev/null
+          echo "verified ${IMAGE_REF}@${DIGEST}"
+        env:
+          IMAGE_REF: ${{ needs.authorize.outputs.image_ref }}
+          DIGEST: ${{ needs.publish.outputs.digest }}
+          ISSUER: ${{ steps.policy.outputs.issuer }}
+          IDENTITY: ${{ steps.policy.outputs.identity }}
+
+      # A wrong identity must fail. Without this the pipeline could accept any signature that
+      # chains to the public trust root, including one produced by another repository.
+      - name: Prove verification rejects an unexpected signer
+        run: |
+          set -euo pipefail
+          if cosign verify \
+              --certificate-oidc-issuer "${ISSUER}" \
+              --certificate-identity-regexp '^https://github\.com/unexpected-owner/unexpected-repo/' \
+              "${IMAGE_REF}@${DIGEST}" > /dev/null 2>&1; then
+            echo "::error::verification accepted an unexpected signer identity"
+            exit 1
+          fi
+          echo "unexpected signer identity rejected"
+          if cosign verify \
+              --certificate-oidc-issuer "https://token.actions.example-unapproved.invalid" \
+              --certificate-identity-regexp "${IDENTITY}" \
+              "${IMAGE_REF}@${DIGEST}" > /dev/null 2>&1; then
+            echo "::error::verification accepted an unexpected issuer"
+            exit 1
+          fi
+          echo "unexpected issuer rejected"
+        env:
+          IMAGE_REF: ${{ needs.authorize.outputs.image_ref }}
+          DIGEST: ${{ needs.publish.outputs.digest }}
+          ISSUER: ${{ steps.policy.outputs.issuer }}
+          IDENTITY: ${{ steps.policy.outputs.identity }}

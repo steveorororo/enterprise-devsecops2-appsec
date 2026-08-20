@@ -1,0 +1,41 @@
+# Approved container registry destinations.
+#
+# Registry flexibility must not become an artifact exfiltration path. A consuming repository
+# chooses a provider and a repository path; it does not choose whether a destination is
+# allowed. A destination that is not approved here is rejected before any authentication is
+# attempted, so credentials are never offered to an unapproved host.
+#
+# status values:
+#   approved   usable now. registry_host is fixed and must match exactly.
+#   candidate  named in the architecture but not configured or tested. Rejected at run time.
+#
+# Adding a provider later requires an endpoint, a repository path convention and an
+# authentication mode. It does not require changing image scanning, SBOM generation, signing,
+# verification or promotion, which are registry neutral.
+
+providers:
+  ghcr:
+    status: approved
+    registry_host: ghcr.io
+    authentication_mode: github-token
+    # Path is owner/name. The publishing repository owns the package.
+    path_pattern: "^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$"
+    notes: Pilot provider. Publishes with the workflow token rather than a stored credential.
+
+  artifactory:
+    status: candidate
+    registry_host: null
+    authentication_mode: registry-token
+    path_pattern: "^[A-Za-z0-9._/-]+$"
+    notes: >-
+      Requires an approved endpoint, repository path and credential before it can be used.
+      Rejected until configured, because an unconfigured destination cannot be verified.
+
+  openshift-internal:
+    status: candidate
+    registry_host: null
+    authentication_mode: registry-token
+    path_pattern: "^[A-Za-z0-9._-]+$"
+    notes: >-
+      Requires an externally reachable route and cluster authorization. A hosted runner
+      cannot resolve the in-cluster service address.

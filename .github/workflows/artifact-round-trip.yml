@@ -1,0 +1,52 @@
+# Platform validation of the artifact security chain against the real pilot registry.
+#
+# Exercises build, publish, digest capture, scanning, SBOM, signing and verification end to
+# end, so the implementation consumers call is the implementation that was proven. Uses the
+# fixtures in tests/fixtures rather than an application, and publishes to a package owned by
+# this repository.
+name: Artifact Round Trip
+
+on:
+  workflow_dispatch:
+    inputs:
+      fixture:
+        description: Which fixture to publish.
+        required: true
+        default: artifact-clean
+        type: choice
+        options:
+          - artifact-clean
+          - artifact-vulnerable
+
+permissions: {}
+
+jobs:
+  round-trip:
+    uses: ./.github/workflows/artifact-security.yml
+    permissions:
+      contents: read
+      packages: write
+      security-events: write
+      id-token: write
+    with:
+      platform_ref: ${{ github.sha }}
+      registry_provider: ghcr
+      registry_path: steveorororo/enterprise-devsecops2-appsec
+      image_name: ${{ inputs.fixture }}
+      build_context: tests/fixtures/${{ inputs.fixture }}
+      dockerfile: tests/fixtures/${{ inputs.fixture }}/Dockerfile
+      requested_host: ghcr.io
+
+  report:
+    needs: round-trip
+    if: always()
+    runs-on: ubuntu-24.04
+    permissions: {}
+    steps:
+      - name: Record the artifact identity
+        run: |
+          echo "image:  ${IMAGE_REF}"
+          echo "digest: ${DIGEST}"
+        env:
+          IMAGE_REF: ${{ needs.round-trip.outputs.image_ref }}
+          DIGEST: ${{ needs.round-trip.outputs.digest }}

@@ -1,0 +1,21 @@
+# Trust policy for artifact signatures and attestations.
+#
+# A valid Sigstore signature only proves that someone signed the artifact. It does not prove
+# who. Verification must also constrain the signer identity and the issuer, otherwise any
+# identity that chains to the public trust root is accepted, including one an attacker
+# controls.
+#
+# These values are the trust anchor for artifact verification and are part of the supply
+# chain. They are fixed here and guarded by tests/regression/test-central-policy.py rather
+# than accepted from a caller, because a caller that can widen the expected identity can
+# authorize its own artifacts.
+#
+# certificate_identity_regexp anchors to the platform repository and the workflow that is
+# permitted to sign. Changing the repository owner during migration requires changing this
+# value and re-running verification.
+
+signing:
+  mechanism: cosign-keyless-oidc
+  certificate_oidc_issuer: https://token.actions.githubusercontent.com
+  certificate_identity_regexp: ^https://github\.com/steveorororo/enterprise-devsecops2-appsec/\.github/workflows/artifact-security\.yml@refs/
+  attestation_type: spdxjson
